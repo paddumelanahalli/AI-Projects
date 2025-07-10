@@ -1,0 +1,153 @@
+CrewAI is built on top of LangChain and is excellent for multi-agent systems, but you can use it for a single agent too. It emphasizes roles, goals, and tasks.
+
+Pre-requisites: Same as LangChain, plus:
+
+pip install crewai crewai-tools
+
+Hands-on Steps (Focusing on Meeting Summary Agent):
+
+Step 1: Set up your environment
+
+Follow Step 1 from LangChain (virtual env, .env file).
+
+pip install crewai crewai-tools langchain-openai python-dotenv
+
+Step 2: Define your Tool
+
+Python
+
+# tools.py
+from crewai_tools import BaseTool
+import os
+
+class MeetingSummarizerTool(BaseTool):
+    name: str = "Meeting Summarizer"
+    description: str = "Useful for summarizing long meeting transcripts or notes, identifying key decisions and action items."
+
+    def _run(self, meeting_content: str) -> str:
+        # In a real scenario, you'd use an LLM call here to summarize
+        # For simplicity, let's do a basic extraction based on keywords
+        summary_lines = []
+        action_items = []
+        decisions = []
+
+        lines = meeting_content.split('\n')
+        for line in lines:
+            if "action item:" in line.lower() or "ai:" in line.lower():
+                action_items.append(line.strip())
+            elif "decision:" in line.lower():
+                decisions.append(line.strip())
+            # Basic summarization - could be replaced with LLM call
+            elif len(line.strip()) > 20 and not any(k in line.lower() for k in ["action item:", "decision:", "attendees:"]):
+                summary_lines.append(line.strip())
+
+        output = "--- Meeting Summary ---\n"
+        output += "\n".join(summary_lines[:3]) + "...\n" if len(summary_lines) > 3 else "\n".join(summary_lines)
+        if decisions:
+            output += "\n\nKey Decisions:\n" + "\n".join(decisions)
+        if action_items:
+            output += "\n\nAction Items:\n" + "\n".join(action_items)
+        output += "\n---------------------\n"
+        return output
+
+# You would integrate this with an actual LLM for intelligent summarization:
+# from langchain_openai import ChatOpenAI
+# from langchain_core.prompts import PromptTemplate
+#
+# class LLMSummarizerTool(BaseTool):
+#     name: str = "LLM Summarizer"
+#     description: str = "Summarizes meeting content, extracting key decisions, action items, and owners."
+#     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3) # Or Gemini
+#
+#     def _run(self, meeting_content: str) -> str:
+#         prompt_template = PromptTemplate.from_template(
+#             "Please summarize the following meeting content, highlighting key decisions and action items with their owners:\n\n{content}"
+#         )
+#         chain = prompt_template | self.llm
+#         return chain.invoke({"content": meeting_content}).content
+
+Step 3: Define your Agent and Task
+
+Python
+
+# main_agent.py
+import os
+from dotenv import load_dotenv
+from crewai import Agent, Task, Crew, Process
+from langchain_openai import ChatOpenAI # or from langchain_google_genai import ChatGoogleGenerativeAI
+from tools import MeetingSummarizerTool # Make sure tools.py is in the same directory
+
+load_dotenv()
+
+# Initialize your LLM
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0) # Replace with ChatGoogleGenerativeAI if using Gemini
+
+# Define the Agent
+summary_agent = Agent(
+    role="Meeting Content Synthesizer",
+    goal="Extract and summarize key information from meeting transcripts, focusing on decisions and action items for project managers.",
+    backstory="You are an expert administrative assistant with a sharp eye for detail, specifically trained to sift through meeting discussions and distill the most critical outcomes for a Senior Director.",
+    verbose=True,
+    allow_delegation=False, # This is a single agent, no delegation needed
+    tools=[MeetingSummarizerTool()], # Add other tools as needed
+    llm=llm
+)
+
+# Define the Task
+meeting_summary_task = Task(
+    description="Summarize the provided meeting transcript/notes. "
+                "Identify all key decisions made and list all action items with their assigned owners and due dates if available. "
+                "Format the output clearly for a project management summary.",
+    expected_output="A concise summary of the meeting, followed by a 'Key Decisions' section and an 'Action Items' section (Owner: Item, Due Date).",
+    agent=summary_agent,
+    inputs={"meeting_content": "Paste your meeting transcript here or read from a file."},
+)
+
+# --- Example Meeting Content (replace with your actual data) ---
+example_meeting_content = """
+Meeting: Q3 Project Sync - 2025-07-09
+Attendees: Sarah (PM), David (Eng Lead), Emily (QA), Mark (Sales)
+
+Discussion:
+Sarah: Let's review the integration status for Project Alpha. David, how's the API integration progressing?
+David: We've completed 80% of the core API integration. We hit a blocker with the authentication module from the external vendor yesterday.
+Emily: Yes, I noticed that in the daily stand-up. We need to get that resolved ASAP for QA to begin.
+Mark: Sales is eager for this to launch by end of Q3.
+Sarah: Okay, **decision:** David, please escalate the authentication blocker with the vendor's tech lead by end of day today.
+David: Got it. I'll reach out to their lead, Jane Smith.
+Sarah: **Action item:** David to provide an update on the authentication blocker by EOD 2025-07-09 to me and Emily.
+Emily: I'll prepare test cases for the integrated API, assuming resolution by Friday. **Action item:** Emily to develop comprehensive API test cases by 2025-07-11.
+Mark: I need a one-page summary of the current status for the leadership meeting next Tuesday. **Action item:** Sarah to draft 1-pager status report by 2025-07-14.
+Sarah: Understood. Let's aim to reconnect on Friday morning to review progress.
+"""
+
+# Update the task's inputs with your example content
+meeting_summary_task.inputs["meeting_content"] = example_meeting_content
+
+
+# Create the Crew (even for a single agent, it orchestrates the process)
+crew = Crew(
+    agents=[summary_agent],
+    tasks=[meeting_summary_task],
+    process=Process.sequential, # Tasks run in sequence if multiple
+    verbose=2 # Higher verbosity shows agent's thought process
+)
+
+# Execute the Crew
+print("Starting Meeting Summary Agent...")
+result = crew.kickoff()
+
+print("\n\n############################")
+print("## Agent's Final Output ##")
+print("############################\n")
+print(result)
+Step 4: Run your CrewAI agent!
+
+Save tools.py and main_agent.py.
+
+Run main_agent.py from your terminal:
+
+Bash
+
+python main_agent.py
+You'll see the verbose output showing the agent's "thought process" and then the final summary.
